@@ -15,6 +15,7 @@ One failed platform never crashes the entire run.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -40,6 +41,32 @@ from config.platforms import (
 from publishers import get_publisher
 
 logger = logging.getLogger(__name__)
+
+URL_RE = re.compile(r"https?://[^\s)\]}>\"']+")
+LINK_PLACEHOLDER_RE = re.compile(r"(?im)^.*(link in bio|\bsee link\b|\blinks?\s*:|🔗).*$")
+
+
+def _normalize_link(url: str) -> str:
+    return url.strip().rstrip(".,;:!?)\"]}'")
+
+
+def _strip_unapproved_links(text: str, allowed_links: set[str]) -> str:
+    if not text:
+        return text
+
+    def _replace(match: re.Match[str]) -> str:
+        found = _normalize_link(match.group(0))
+        return match.group(0) if found in allowed_links else ""
+
+    return URL_RE.sub(_replace, text)
+
+
+def _strip_link_placeholders(text: str) -> str:
+    if not text:
+        return text
+    cleaned = LINK_PLACEHOLDER_RE.sub("", text)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
 
 
 class WorkflowEngine:
@@ -157,8 +184,38 @@ class WorkflowEngine:
 
                 # Convert CrewAI adaptation to PlatformPayload
                 payload = self.crew.adaptation_to_payload(adaptation, package.content_id)
+                # Guardrail: never publish AI-invented links; allow only user-provided links.
+                allowed_links = {_normalize_link(link) for link in package.links if link.strip()}
+                payload.links = [
+                    link for link in payload.links
+                    if _normalize_link(link) in allowed_links
+                ]
+                payload.body = _strip_unapproved_links(payload.body, allowed_links)
+                payload.caption = _strip_unapproved_links(payload.caption, allowed_links)
+                payload.title = _strip_unapproved_links(payload.title, allowed_links)
+                if not allowed_links:
+                    payload.body = _strip_link_placeholders(payload.body)
+                    payload.caption = _strip_link_placeholders(payload.caption)
+                    payload.title = _strip_link_placeholders(payload.title)
                 # Attach media from original package
                 payload.media_paths = package.uploaded_assets
+
+                # Defensive fallback: if adaptation returns empty Facebook text,
+                # reuse original package fields so title-only uploads still publish.
+                if platform == Platform.FACEBOOK:
+                    payload.title = (payload.title or "").strip()
+                    payload.body = (payload.body or "").strip()
+                    payload.caption = (payload.caption or "").strip()
+                    if not payload.body:
+                        payload.body = (
+                            payload.caption
+                            or payload.title
+                            or package.short_caption.strip()
+                            or package.long_body.strip()
+                            or package.title.strip()
+                        )
+                    if not payload.title:
+                        payload.title = package.title.strip()
 
                 # Save the payload
                 self.storage.save_platform_payload(payload)

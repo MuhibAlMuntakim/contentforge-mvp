@@ -56,8 +56,10 @@ st.set_page_config(
 # ── Initialize session state ─────────────────────────────────────────────────
 if "storage" not in st.session_state:
     st.session_state.storage = Storage()
-if "workflow" not in st.session_state:
-    st.session_state.workflow = WorkflowEngine(st.session_state.storage)
+
+# Always refresh workflow so code/env edits are picked up without stale instances.
+st.session_state.workflow = WorkflowEngine(st.session_state.storage)
+
 if "content_package" not in st.session_state:
     st.session_state.content_package = None
 if "validation_result" not in st.session_state:

@@ -44,6 +44,7 @@ PLATFORM_CREDENTIALS = {
     "facebook": {
         "app_id": os.getenv("FACEBOOK_APP_ID", ""),
         "app_secret": os.getenv("FACEBOOK_APP_SECRET", ""),
+        "page_id": os.getenv("FACEBOOK_PAGE_ID", ""),
         "page_token": os.getenv("FACEBOOK_PAGE_TOKEN", ""),
     },
     "medium": {
